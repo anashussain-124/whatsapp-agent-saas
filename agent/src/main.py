@@ -4,6 +4,7 @@ Updated for Meta WhatsApp Cloud API.
 """
 import os
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -19,7 +20,16 @@ from .handlers.dashboard import router as dashboard_router
 async def lifespan(app: FastAPI):
     """Startup and shutdown events."""
     logger.info(f"Starting WhatsApp Agent SaaS in {settings.APP_ENV} mode")
-    os.makedirs("./data", exist_ok=True)
+    
+    # Use absolute path for data directory (works on Render too)
+    data_dir = Path(__file__).parent.parent / "data"
+    data_dir.mkdir(parents=True, exist_ok=True)
+    
+    # Override DATABASE_URL with absolute path if using SQLite
+    if "sqlite" in settings.DATABASE_URL and "./data" in settings.DATABASE_URL:
+        abs_db_path = data_dir / "whatsapp_agent.db"
+        os.environ["DATABASE_URL"] = f"sqlite+aiosqlite:///{abs_db_path}"
+    
     await init_db()
     logger.info("Database initialized")
     yield
@@ -58,5 +68,5 @@ async def root():
 
 @app.get("/health")
 async def health():
-    """Health check endpoint. Use with free uptime monitors (e.g. cron + Telegram bot)."""
+    """Health check endpoint. Use with free uptime monitors."""
     return {"status": "healthy", "version": "0.2.0"}

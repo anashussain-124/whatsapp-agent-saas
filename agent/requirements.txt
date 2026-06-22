@@ -1,7 +1,4 @@
 # WhatsApp Agent SaaS — Python Dependencies
-# Install: pip install -r requirements.txt
-
-# Python 3.12 compatible versions (Render free tier compatible)
 fastapi==0.115.0
 uvicorn[standard]==0.30.0
 httpx==0.27.0
@@ -14,3 +11,4 @@ loguru==0.7.2
 python-multipart==0.0.12
 aiofiles==24.1.0
 jinja2==3.1.4
+apscheduler==3.10.4

@@ -8,12 +8,11 @@ from datetime import datetime, date, timedelta, timezone
 
 from fastapi import APIRouter, HTTPException, Depends, Query
 from pydantic import BaseModel
-from sqlalchemy import select, func, and_
+from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..models import (
-    Business, Service, Conversation, Message, Booking,
-    DailyAnalytics, get_db
+    Business, Service, Conversation, Message, Booking, get_db
 )
 
 router = APIRouter(prefix="/api")

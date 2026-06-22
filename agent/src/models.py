@@ -1,7 +1,6 @@
 """
 Database models and connection for WhatsApp Agent SaaS.
 Uses SQLAlchemy 2.0 with async support.
-Updated: Meta Cloud API fields, Meta message ID, opt-out support.
 """
 from datetime import datetime, timezone
 from typing import Optional
@@ -9,7 +8,7 @@ import uuid
 
 from sqlalchemy import (
     Boolean, Column, Date, DateTime, ForeignKey, Integer,
-    String, Text, UniqueConstraint,
+    String, Text, UniqueConstraint, Index,
 )
 from sqlalchemy.orm import DeclarativeBase, relationship
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
@@ -27,38 +26,46 @@ def generate_id() -> str:
 
 class Business(Base):
     __tablename__ = "businesses"
+    __table_args__ = (
+        Index("ix_businesses_whatsapp_number", "whatsapp_number"),
+        Index("ix_businesses_whatsapp_phone_number_id", "whatsapp_phone_number_id"),
+        Index("ix_businesses_is_active", "is_active"),
+    )
 
     id = Column(String, primary_key=True, default=generate_id)
-    name = Column(String, nullable=False)
+    name = Column(String, nullable=False, index=True)
     phone = Column(String)
     industry = Column(String, nullable=False)
     address = Column(String)
-    city = Column(String)
+    city = Column(String, index=True)
     state = Column(String)
     pincode = Column(String)
     timezone = Column(String, default="Asia/Kolkata")
 
     # WhatsApp (Meta Cloud API)
-    whatsapp_number = Column(String)  # Display number (e.g., "919876543210")
-    whatsapp_phone_number_id = Column(String)  # Meta phone number ID
-    whatsapp_token = Column(String, default="")  # Business-specific token (optional, uses default if empty)
+    whatsapp_number = Column(String, unique=True)
+    whatsapp_phone_number_id = Column(String, unique=True)
+    whatsapp_token = Column(String, default="")
 
     # LLM
     openrouter_key = Column(String)
     system_prompt = Column(Text)
 
-    is_active = Column(Boolean, default=True)
+    is_active = Column(Boolean, default=True, index=True)
     plan = Column(String, default="free")
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
-    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc), nullable=False)
 
-    services = relationship("Service", back_populates="business", lazy="selectin")
-    conversations = relationship("Conversation", back_populates="business", lazy="selectin")
-    bookings = relationship("Booking", back_populates="business", lazy="selectin")
+    services = relationship("Service", back_populates="business", lazy="selectin", cascade="all, delete-orphan")
+    conversations = relationship("Conversation", back_populates="business", lazy="selectin", cascade="all, delete-orphan")
+    bookings = relationship("Booking", back_populates="business", lazy="selectin", cascade="all, delete-orphan")
 
 
 class Service(Base):
     __tablename__ = "services"
+    __table_args__ = (
+        Index("ix_services_business_id", "business_id"),
+    )
 
     id = Column(String, primary_key=True, default=generate_id)
     business_id = Column(String, ForeignKey("businesses.id"), nullable=False)
@@ -84,6 +91,11 @@ class BusinessHours(Base):
 
 class Conversation(Base):
     __tablename__ = "conversations"
+    __table_args__ = (
+        Index("ix_conversations_business_phone", "business_id", "customer_phone"),
+        Index("ix_conversations_status", "status"),
+        Index("ix_conversations_last_msg", "last_message_at"),
+    )
 
     id = Column(String, primary_key=True, default=generate_id)
     business_id = Column(String, ForeignKey("businesses.id"), nullable=False)
@@ -102,13 +114,17 @@ class Conversation(Base):
 
 class Message(Base):
     __tablename__ = "messages"
+    __table_args__ = (
+        Index("ix_messages_conversation", "conversation_id"),
+        Index("ix_messages_meta_id", "meta_message_id"),
+    )
 
     id = Column(String, primary_key=True, default=generate_id)
     conversation_id = Column(String, ForeignKey("conversations.id"), nullable=False)
     direction = Column(String, nullable=False)  # inbound, outbound
     message_type = Column(String, default="text")
     content = Column(Text)
-    meta_message_id = Column(String, default="")  # Meta message ID (replaces twilio_sid)
+    meta_message_id = Column(String, default="")
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
     conversation = relationship("Conversation", back_populates="messages")
@@ -116,6 +132,10 @@ class Message(Base):
 
 class Booking(Base):
     __tablename__ = "bookings"
+    __table_args__ = (
+        Index("ix_bookings_business_date", "business_id", "booking_date"),
+        Index("ix_bookings_status", "status"),
+    )
 
     id = Column(String, primary_key=True, default=generate_id)
     business_id = Column(String, ForeignKey("businesses.id"), nullable=False)
@@ -149,19 +169,18 @@ class DailyAnalytics(Base):
 
 
 # ─── Database engine ────────────────────────────────────────────────
-# Supports both SQLite (default, zero-cost) and PostgreSQL (Supabase free tier)
-# Switch via DATABASE_URL env var — no code changes needed.
-
 _db_url = settings.DATABASE_URL
 
-# If using bare sqlite:/// path, add aiosqlite driver
 if _db_url.startswith("sqlite:///"):
     _db_url = _db_url.replace("sqlite:///", "sqlite+aiosqlite:///")
-# If using postgres without async driver, add +asyncpg
 elif _db_url.startswith("postgresql://"):
     _db_url = _db_url.replace("postgresql://", "postgresql+asyncpg://", 1)
 
-engine = create_async_engine(_db_url, echo=settings.APP_ENV == "development")
+engine = create_async_engine(
+    _db_url,
+    echo=settings.APP_ENV == "development",
+    pool_pre_ping=True,
+)
 async_session = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
 

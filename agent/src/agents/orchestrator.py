@@ -11,7 +11,7 @@ Follows Anthropic's "orchestrator-workers" pattern:
 """
 import json
 import re
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 from loguru import logger
 from typing import Optional
@@ -20,7 +20,7 @@ from typing import Optional
 IST = ZoneInfo("Asia/Kolkata")
 
 from ..models import Business, Conversation, Message, Service, Booking
-from ..services.llm import LLMClient
+from ..services.llm import LLMClient, FALLBACK_REPLY
 
 
 # ─── Conversation States ────────────────────────────────────────────
@@ -142,7 +142,7 @@ class ConversationContext:
         self.data.setdefault("history", []).append({
             "role": role,
             "content": content,
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": datetime.now(IST).isoformat(),
         })
         # Keep last 20 messages
         self.data["history"] = self.data["history"][-20:]
@@ -166,9 +166,11 @@ class OrchestratorAgent:
     def __init__(self, business: Business, db_session):
         self.business = business
         self.db = db_session
-        self.llm = LLMClient(
-            api_key=business.openrouter_key,
-        )
+        # Use business-specific key or fall back to settings default
+        api_key = business.openrouter_key or settings.OPENROUTER_API_KEY
+        if not api_key:
+            logger.warning(f"No OpenRouter API key for business {business.name}")
+        self.llm = LLMClient(api_key=api_key)
 
     async def process_message(
         self,
@@ -212,7 +214,7 @@ class OrchestratorAgent:
         ctx.add_to_history("assistant", response)
         conversation.context_json = ctx.to_json()
         conversation.current_intent = intent
-        conversation.last_message_at = datetime.utcnow()
+        conversation.last_message_at = datetime.now(IST)
 
         # Save outbound message
         out_msg = Message(
